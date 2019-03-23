@@ -1,15 +1,10 @@
-import multiprocessing
 import threading
 import socket
 import sys
 import time
 
-from rx import Observer, Observable
-from rx.concurrency import ThreadPoolScheduler
-
 TELLO_COMMAND_PORT = 8889
 TELLO_STATUS_PORT = 8890
-
 TELLO_IP = "192.168.10.1"
 
 
@@ -28,8 +23,15 @@ class Drone:
 
         self._stopper = threading.Event()
 
+        # create a socket to listen to the status from the drone
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listen_socket.bind(("", self._status_port))
+
+        # start a thread that will listen to the status reports and dump them to
+        # the console
+        self.listen_thread = threading.Thread(target=self._listen)
+        self.listen_thread.daemon = True
+        self.listen_thread.start()
 
         # create a socket over which we can send the command
         # that triggers the drone to start generating status messages
@@ -41,14 +43,12 @@ class Drone:
         # status, and allows it to accept control commands
         self.send_command("command")
 
-    def observe(self, observer):
+    def _listen(self):
 
         while not self._stopper.is_set():
             data, _ = self.listen_socket.recvfrom(4096)
             status = status_to_dict(data.decode("utf-8"))
-            observer.on_next(status)
-
-        observer.on_completed()
+            print(status)
 
     def send_command(self, command):
         self.command_socket.sendto(command.encode("utf-8"), self._command_address)
@@ -73,17 +73,14 @@ def status_to_dict(status_str):
 
 
 def listen():
-    optimal_thread_count = multiprocessing.cpu_count()
-    pool_scheduler = ThreadPoolScheduler(optimal_thread_count)
-
     drone = Drone(TELLO_IP, TELLO_COMMAND_PORT, TELLO_STATUS_PORT)
 
     input("press any key to start\n")
     drone.start()
-    time.sleep(5.0)
-    drone.send_command("takeoff")
-    time.sleep(7.0)
-    drone.send_command("land")
+    # time.sleep(5.0)
+    # drone.send_command("takeoff")
+    # time.sleep(7.0)
+    # drone.send_command("land")
     input("press any key to stop\n")
     drone.stop()
 

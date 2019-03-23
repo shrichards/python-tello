@@ -2,5 +2,4 @@ appdirs==1.4.3
 attrs==18.2.0
 black==18.9b0
 Click==7.0
-Rx==1.6.1
 toml==0.10.0
