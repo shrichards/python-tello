@@ -2,6 +2,7 @@ import multiprocessing
 import threading
 import socket
 import sys
+import time
 
 from rx import Observer, Observable
 from rx.concurrency import ThreadPoolScheduler
@@ -12,22 +13,33 @@ TELLO_STATUS_PORT = 8890
 TELLO_IP = "192.168.10.1"
 
 
-class DroneStatus:
+class Drone:
     """
     Creates a connection to the Tello drone, and exposes methods
     for observing status updates and stopping updates
     """
 
-    def __init__(self):
+    def __init__(self, ip_address, command_port, status_port):
+        self._ip_address = ip_address
+        self._command_port = command_port
+        self._status_port = status_port
+
+        self._command_address = (self._ip_address, self._command_port)
+
         self._stopper = threading.Event()
+
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.listen_socket.bind(("", TELLO_STATUS_PORT))
+        self.listen_socket.bind(("", self._status_port))
 
         # create a socket over which we can send the command
         # that triggers the drone to start generating status messages
-        command_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        command_socket.bind(("", TELLO_COMMAND_PORT))
-        command_socket.sendto(bytes("command", "utf-8"), (TELLO_IP, TELLO_COMMAND_PORT))
+        self.command_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.command_socket.bind(("", self._command_port))
+
+    def start(self):
+        # the 'command' command causes the tello to start broadcasting its
+        # status, and allows it to accept control commands
+        self.send_command("command")
 
     def observe(self, observer):
 
@@ -38,9 +50,13 @@ class DroneStatus:
 
         observer.on_completed()
 
+    def send_command(self, command):
+        self.command_socket.sendto(command.encode("utf-8"), self._command_address)
+
     def stop(self):
         self._stopper.set()
-        pass
+        self.listen_socket.close()
+        self.command_socket.close()
 
 
 def status_to_dict(status_str):
@@ -60,19 +76,16 @@ def listen():
     optimal_thread_count = multiprocessing.cpu_count()
     pool_scheduler = ThreadPoolScheduler(optimal_thread_count)
 
-    drone_status = DroneStatus()
+    drone = Drone(TELLO_IP, TELLO_COMMAND_PORT, TELLO_STATUS_PORT)
 
-    source = (
-        Observable.create(drone_status.observe)
-        .subscribe_on(pool_scheduler)
-        .subscribe(
-            on_next=lambda i: print(f"Status: {i}"),
-            on_error=lambda e: print(f"ERROR: {e}"),
-            on_completed=lambda: print("DONE!"),
-        )
-    )
-    input("press any key to Stop\n")
-    drone_status.stop()
+    input("press any key to start\n")
+    drone.start()
+    time.sleep(5.0)
+    drone.send_command("takeoff")
+    time.sleep(7.0)
+    drone.send_command("land")
+    input("press any key to stop\n")
+    drone.stop()
 
 
 if __name__ == "__main__":
